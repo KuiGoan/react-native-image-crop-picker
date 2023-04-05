@@ -19,6 +19,7 @@ import android.util.Base64;
 import android.util.Log;
 import android.webkit.MimeTypeMap;
 
+import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.FileProvider;
 
@@ -34,6 +35,7 @@ import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.bridge.WritableNativeMap;
 import com.facebook.react.modules.core.PermissionAwareActivity;
 import com.facebook.react.modules.core.PermissionListener;
+import com.reactnative.ivpusic.imagepicker.patch30277.Patch30277SharedPreferences;
 import com.yalantis.ucrop.UCrop;
 import com.yalantis.ucrop.UCropActivity;
 
@@ -105,11 +107,14 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
     private ResultCollector resultCollector = new ResultCollector();
     private Compression compression = new Compression();
     private ReactApplicationContext reactContext;
+    private @Nullable ReadableMap lastReadableMap;
 
     PickerModule(ReactApplicationContext reactContext) {
         super(reactContext);
         reactContext.addActivityEventListener(this);
         this.reactContext = reactContext;
+
+        this.recoverLastImageUri(reactContext);
     }
 
     private String getTmpDir(Activity activity) {
@@ -125,6 +130,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
     }
 
     private void setConfiguration(final ReadableMap options) {
+        Patch30277SharedPreferences.saveOptions(getReactApplicationContext(), options);
         mediaType = options.hasKey("mediaType") ? options.getString("mediaType") : "any";
         multiple = options.hasKey("multiple") && options.getBoolean("multiple");
         includeBase64 = options.hasKey("includeBase64") && options.getBoolean("includeBase64");
@@ -295,6 +301,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
     @ReactMethod
     public void openCamera(final ReadableMap options, final Promise promise) {
         final Activity activity = getCurrentActivity();
+        lastReadableMap = null;
 
         if (activity == null) {
             promise.reject(E_ACTIVITY_DOES_NOT_EXIST, "Activity doesn't exist");
@@ -316,6 +323,27 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
                 return null;
             }
         });
+    }
+
+    @ReactMethod
+    public void recoverLastImageUri(final Promise promise) {
+        if(lastReadableMap != null) {
+            promise.resolve(lastReadableMap);
+            lastReadableMap = null;
+        } else {
+            promise.resolve(null);
+        }
+    }
+
+    private void recoverLastImageUri(ReactApplicationContext reactContext) {
+        @Nullable Uri lastImageUri = Patch30277SharedPreferences.getLastTempImageUri(reactContext);
+        @Nullable ReadableMap optionsMap = Patch30277SharedPreferences.getOptions(reactContext);
+        @Nullable String mediaPath = Patch30277SharedPreferences.getCurrentMediaPath(reactContext);
+        if(lastImageUri != null && optionsMap != null && mediaPath != null) {
+            setConfiguration(optionsMap);
+            mCameraCaptureURI=lastImageUri;
+            mCurrentMediaPath = mediaPath;
+        }
     }
 
     private void initiateCamera(Activity activity) {
@@ -342,6 +370,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
                         dataFile);
             }
 
+            Patch30277SharedPreferences.saveLastTempImageUri(activity, mCameraCaptureURI);
             cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, mCameraCaptureURI);
 
             if (this.useFrontCamera) {
@@ -394,6 +423,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
     @ReactMethod
     public void openPicker(final ReadableMap options, final Promise promise) {
         final Activity activity = getCurrentActivity();
+        lastReadableMap = null;
 
         if (activity == null) {
             promise.reject(E_ACTIVITY_DOES_NOT_EXIST, "Activity doesn't exist");
@@ -415,6 +445,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
     @ReactMethod
     public void openCropper(final ReadableMap options, final Promise promise) {
         final Activity activity = getCurrentActivity();
+        lastReadableMap = null;
 
         if (activity == null) {
             promise.reject(E_ACTIVITY_DOES_NOT_EXIST, "Activity doesn't exist");
@@ -505,7 +536,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
             return;
         }
 
-        resultCollector.notifySuccess(getImage(activity, path));
+        this.notifySuccess(getImage(activity, path));
     }
 
     private Bitmap validateVideo(String path) throws Exception {
@@ -558,7 +589,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
                             video.putString("path", "file://" + videoPath);
                             video.putString("modificationDate", String.valueOf(modificationDate));
 
-                            resultCollector.notifySuccess(video);
+                            PickerModule.this.notifySuccess(video);
                         } catch (Exception e) {
                             resultCollector.notifyProblem(E_NO_IMAGE_DATA_FOUND, e);
                         }
@@ -830,7 +861,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
                     // If recording a video getSelection handles resultCollector part itself and returns null
                     if (result != null) {
-                        resultCollector.notifySuccess(result);
+                        this.notifySuccess(result);
                     }
                 } catch (Exception ex) {
                     resultCollector.notifyProblem(E_NO_IMAGE_DATA_FOUND, ex.getMessage());
@@ -856,7 +887,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
                         result.putMap("cropRect", PickerModule.getCroppedRectMap(data));
 
                         resultCollector.setWaitCount(1);
-                        resultCollector.notifySuccess(result);
+                        this.notifySuccess(result);
                     } else {
                         throw new Exception("Cannot crop video files");
                     }
@@ -877,6 +908,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
             imagePickerResult(activity, requestCode, resultCode, data);
         } else if (requestCode == CAMERA_PICKER_REQUEST) {
             cameraPickerResult(activity, requestCode, resultCode, data);
+            Patch30277SharedPreferences.clear(activity);
         } else if (requestCode == UCrop.REQUEST_CROP) {
             croppingResult(activity, requestCode, resultCode, data);
         }
@@ -904,6 +936,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
         // Save a file: path for use with ACTION_VIEW intents
         mCurrentMediaPath = "file:" + image.getAbsolutePath();
+        Patch30277SharedPreferences.saveCurrentMediaPath(getReactApplicationContext(), mCurrentMediaPath);
 
         return image;
 
@@ -922,9 +955,17 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
         // Save a file: path for use with ACTION_VIEW intents
         mCurrentMediaPath = "file:" + video.getAbsolutePath();
+        Patch30277SharedPreferences.saveCurrentMediaPath(getReactApplicationContext(), mCurrentMediaPath);
 
         return video;
 
+    }
+
+    private void notifySuccess(WritableMap readableMap) {
+        boolean isNotifySent = resultCollector.notifySuccess(readableMap);
+        if(!isNotifySent){
+            lastReadableMap = readableMap;
+        }
     }
 
     private static WritableMap getCroppedRectMap(Intent data) {
