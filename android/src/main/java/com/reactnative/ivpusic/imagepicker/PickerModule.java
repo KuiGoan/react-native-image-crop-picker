@@ -334,7 +334,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
             Intent cameraIntent = new Intent(intent);
 
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
                 mCameraCaptureURI = Uri.fromFile(dataFile);
             } else {
                 mCameraCaptureURI = FileProvider.getUriForFile(activity,
@@ -346,7 +346,7 @@ class PickerModule extends ReactContextBaseJavaModule implements ActivityEventLi
 
             cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, mCameraCaptureURI);
 
-            if (this.useFrontCamera) {
+            if (mediaType.equals("video") && this.useFrontCamera) {
                 cameraIntent.putExtra("android.intent.extras.CAMERA_FACING", 1);
                 cameraIntent.putExtra("android.intent.extras.LENS_FACING_FRONT", 1);
                 cameraIntent.putExtra("android.intent.extra.USE_FRONT_CAMERA", true);
